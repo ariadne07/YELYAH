@@ -1,0 +1,12 @@
+[wokwi]
+version = 1
+firmware = ".pio/build/seeed_xiao_esp32s3_plus/firmware.bin"
+elf = ".pio/build/seeed_xiao_esp32s3_plus/firmware.elf"
+
+[[chip]]
+name = 'adafruit-pcm5102a'
+binary = 'chips/adafruit-pcm5102a.chip.wasm'
+
+[[chip]]
+name = 'adafruit-microsd'
+binary = 'chips/adafruit-microsd.chip.wasm'

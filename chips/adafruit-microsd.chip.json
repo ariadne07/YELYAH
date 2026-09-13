@@ -1,0 +1,16 @@
+{
+  "name": "adafruit-microsd",
+  "author": "Kaylee",
+  "pins": [
+    "3V",
+    "GND",
+    "CLK",
+    "SO",
+    "SI",
+    "CS",
+    "D1",
+    "D2",
+    "DET"
+  ],
+  "controls": []
+}

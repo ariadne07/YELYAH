@@ -1,0 +1,25 @@
+{
+  "name": "adafruit-pcm5102a",
+  "author": "Kaylee",
+  "pins": [
+    "VIN",
+    "GND",
+    "WSEL",
+    "DIN",
+    "BCK",
+    "LOUT",
+    "G",
+    "ROUT",
+    "DE",
+    "FIL",
+    "MCK",
+    "MU",
+    "FM",
+    "3V"
+  ],
+  "controls": [],
+  "wasm": "adafruit-pcm5102a.chip.wasm",
+  "memory": {
+    "initial": 2
+  }
+}
