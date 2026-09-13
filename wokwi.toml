@@ -1,7 +1,7 @@
 [wokwi]
 version = 1
-firmware = ".pio/build/seeed_xiao_esp32s3_plus/firmware.bin"
-elf = ".pio/build/seeed_xiao_esp32s3_plus/firmware.elf"
+firmware = ".pio/build/wokwi/firmware.bin"
+elf = ".pio/build/wokwi/firmware.elf"
 
 [[chip]]
 name = 'adafruit-pcm5102a'
