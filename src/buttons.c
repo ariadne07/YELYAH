@@ -8,12 +8,18 @@
 static const char *TAG = "BUTTONS";
 
 /* Timing configuration */
-#define LONG_PRESS_TIME_US       800000    // 800 ms
-#define DOUBLE_CLICK_TIME_US     400000    // 400 ms
+#define DEBOUNCE_TIME_US      50000     // 50 ms
+#define LONG_PRESS_TIME_US    700000    // 700 ms
+#define DOUBLE_CLICK_TIME_US  400000    // 400 ms
 
 typedef struct {
+    bool raw_state;
+    bool stable_state;
+
     bool pressed;
     bool long_sent;
+
+    int64_t state_change_time;
     int64_t press_time;
 } button_state_t;
 
@@ -25,8 +31,6 @@ static button_state_t center_state = {0};
 
 static bool center_waiting_for_second_click = false;
 static int64_t center_first_click_time = 0;
-
-static button_event_t last_event = BUTTON_NONE;
 
 
 void buttons_init(void)
@@ -48,12 +52,90 @@ void buttons_init(void)
 
     gpio_config(&config);
 
+    /*
+     * Initialize button states based on their
+     * current physical state.
+     */
+    int64_t now = esp_timer_get_time();
+
+    up_state.raw_state =
+        up_state.stable_state =
+        (gpio_get_level(PIN_BUTTON_UP) == 0);
+    up_state.state_change_time = now;
+
+    down_state.raw_state =
+        down_state.stable_state =
+        (gpio_get_level(PIN_BUTTON_DOWN) == 0);
+    down_state.state_change_time = now;
+
+    left_state.raw_state =
+        left_state.stable_state =
+        (gpio_get_level(PIN_BUTTON_LEFT) == 0);
+    left_state.state_change_time = now;
+
+    right_state.raw_state =
+        right_state.stable_state =
+        (gpio_get_level(PIN_BUTTON_RIGHT) == 0);
+    right_state.state_change_time = now;
+
+    center_state.raw_state =
+        center_state.stable_state =
+        (gpio_get_level(PIN_BUTTON_CENTER) == 0);
+    center_state.state_change_time = now;
+
     ESP_LOGI(TAG, "Buttons initialized");
 }
 
 
+/*
+ * Debounce a single button.
+ *
+ * Returns:
+ *   true  = button is stably pressed
+ *   false = button is stably released
+ */
+static bool debounce_button(
+    int gpio_level,
+    button_state_t *state
+)
+{
+    int64_t now = esp_timer_get_time();
+
+    bool raw_pressed = (gpio_level == 0);
+
+    /*
+     * Raw signal changed.
+     * Start/restart debounce timer.
+     */
+    if (raw_pressed != state->raw_state) {
+        state->raw_state = raw_pressed;
+        state->state_change_time = now;
+    }
+
+    /*
+     * Raw signal has stayed unchanged long enough
+     * to accept the new stable state.
+     */
+    if (state->stable_state != state->raw_state) {
+
+        if ((now - state->state_change_time) >= DEBOUNCE_TIME_US) {
+            state->stable_state = state->raw_state;
+        }
+    }
+
+    return state->stable_state;
+}
+
+
+/*
+ * Process a debounced button.
+ *
+ * Generates either:
+ *   - a normal button event on release
+ *   - a long-press event after LONG_PRESS_TIME_US
+ */
 static button_event_t process_button(
-    int level,
+    bool pressed,
     button_state_t *state,
     button_event_t click_event,
     button_event_t long_event
@@ -64,8 +146,11 @@ static button_event_t process_button(
     /*
      * Button is pressed.
      */
-    if (level == 0) {
+    if (pressed) {
 
+        /*
+         * This is the beginning of a new press.
+         */
         if (!state->pressed) {
             state->pressed = true;
             state->long_sent = false;
@@ -79,21 +164,23 @@ static button_event_t process_button(
             (now - state->press_time) >= LONG_PRESS_TIME_US) {
 
             state->long_sent = true;
+
             return long_event;
         }
     }
 
     /*
-     * Button was released.
+     * Button is released.
      */
     else {
 
         if (state->pressed) {
+
             state->pressed = false;
 
             /*
-             * If long press already happened,
-             * don't also generate a click.
+             * If a long press has already been sent,
+             * don't also send a normal click.
              */
             if (!state->long_sent) {
                 return click_event;
@@ -110,13 +197,25 @@ button_event_t buttons_get_event(void)
     int64_t now = esp_timer_get_time();
 
     /*
-     * Check center first because it has
-     * special double-click behavior.
+     * ------------------------------------------------
+     * CENTER BUTTON
+     * ------------------------------------------------
+     *
+     * Center has:
+     *   - normal click
+     *   - double click
+     *   - long press
      */
 
-    int center_level = gpio_get_level(PIN_BUTTON_CENTER);
+    bool center_pressed = debounce_button(
+        gpio_get_level(PIN_BUTTON_CENTER),
+        &center_state
+    );
 
-    if (center_level == 0) {
+    /*
+     * Center is pressed.
+     */
+    if (center_pressed) {
 
         if (!center_state.pressed) {
             center_state.pressed = true;
@@ -137,6 +236,10 @@ button_event_t buttons_get_event(void)
             return BUTTON_CENTER_LONG;
         }
     }
+
+    /*
+     * Center is released.
+     */
     else {
 
         if (center_state.pressed) {
@@ -144,8 +247,7 @@ button_event_t buttons_get_event(void)
             center_state.pressed = false;
 
             /*
-             * If it was a long press, don't treat
-             * the release as a click.
+             * Don't treat a long press as a click.
              */
             if (!center_state.long_sent) {
 
@@ -156,7 +258,6 @@ button_event_t buttons_get_event(void)
 
                     center_waiting_for_second_click = true;
                     center_first_click_time = now;
-
                 }
 
                 /*
@@ -173,20 +274,20 @@ button_event_t buttons_get_event(void)
                     }
 
                     /*
-                     * Too much time passed.
+                     * Second click came too late.
+                     * Start a new single-click window.
                      */
-                    else {
-                        center_first_click_time = now;
-                    }
+                    center_first_click_time = now;
                 }
             }
         }
     }
 
+
     /*
-     * If we're waiting for a possible second
-     * center click and the timeout expires,
-     * generate the single click.
+     * If the center button has been waiting for
+     * a second click and the timeout expires,
+     * report the first click as a normal CENTER event.
      */
     if (center_waiting_for_second_click &&
         (now - center_first_click_time) > DOUBLE_CLICK_TIME_US) {
@@ -198,13 +299,19 @@ button_event_t buttons_get_event(void)
 
 
     /*
-     * Other buttons.
+     * ------------------------------------------------
+     * OTHER BUTTONS
+     * ------------------------------------------------
      */
 
     button_event_t event;
 
+
     event = process_button(
-        gpio_get_level(PIN_BUTTON_UP),
+        debounce_button(
+            gpio_get_level(PIN_BUTTON_UP),
+            &up_state
+        ),
         &up_state,
         BUTTON_UP,
         BUTTON_UP_LONG
@@ -216,7 +323,10 @@ button_event_t buttons_get_event(void)
 
 
     event = process_button(
-        gpio_get_level(PIN_BUTTON_DOWN),
+        debounce_button(
+            gpio_get_level(PIN_BUTTON_DOWN),
+            &down_state
+        ),
         &down_state,
         BUTTON_DOWN,
         BUTTON_DOWN_LONG
@@ -228,7 +338,10 @@ button_event_t buttons_get_event(void)
 
 
     event = process_button(
-        gpio_get_level(PIN_BUTTON_LEFT),
+        debounce_button(
+            gpio_get_level(PIN_BUTTON_LEFT),
+            &left_state
+        ),
         &left_state,
         BUTTON_LEFT,
         BUTTON_LEFT_LONG
@@ -240,7 +353,10 @@ button_event_t buttons_get_event(void)
 
 
     event = process_button(
-        gpio_get_level(PIN_BUTTON_RIGHT),
+        debounce_button(
+            gpio_get_level(PIN_BUTTON_RIGHT),
+            &right_state
+        ),
         &right_state,
         BUTTON_RIGHT,
         BUTTON_RIGHT_LONG
