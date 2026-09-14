@@ -4,12 +4,18 @@
 #include "buttons.h"
 
 typedef enum {
-    UI_MENU,
-    UI_NOW_PLAYING
+UI_MENU,
+UI_NOW_PLAYING
 } ui_screen_t;
 
 void ui_init(void);
-void ui_handle_event(button_event_t event);
+
+void ui_handle_event(
+button_event_t event
+);
+
+void ui_render(void);
+
 ui_screen_t ui_get_screen(void);
 
 #endif

@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "display.h"
 
 #include "esp_log.h"
 
@@ -6,7 +7,14 @@ static const char *TAG = "UI";
 
 #define MENU_ITEM_COUNT 5
 
+#define COLOR_BLACK  0x0000
+#define COLOR_WHITE  0xFFFF
+#define COLOR_GREEN  0x07E0
+#define COLOR_BLUE   0x001F
+#define COLOR_RED    0xF800
+
 static ui_screen_t current_screen = UI_MENU;
+
 static int menu_selection = 0;
 
 static const char *menu_items[MENU_ITEM_COUNT] = {
@@ -18,40 +26,186 @@ static const char *menu_items[MENU_ITEM_COUNT] = {
 };
 
 
-static void show_menu(void)
-{
-    ESP_LOGI(TAG, "----- MENU VIEW -----");
+/*
+ * --------------------------------------------------
+ * MENU
+ * --------------------------------------------------
+ */
 
+static void render_menu(void)
+{
+    display_clear(COLOR_BLACK);
+
+    /*
+     * Title
+     */
+    display_draw_text(
+        10,
+        10,
+        "YELYAH",
+        COLOR_WHITE,
+        COLOR_BLACK,
+        3
+    );
+
+    /*
+     * Menu items
+     */
     for (int i = 0; i < MENU_ITEM_COUNT; i++) {
 
+        int y = 70 + (i * 35);
+
+        /*
+         * Highlight selected item.
+         */
         if (i == menu_selection) {
-            ESP_LOGI(TAG, "> %s", menu_items[i]);
+
+            display_fill_rect(
+                5,
+                y - 3,
+                230,
+                25,
+                COLOR_BLUE
+            );
+
+            display_draw_text(
+                12,
+                y,
+                menu_items[i],
+                COLOR_WHITE,
+                COLOR_BLUE,
+                2
+            );
+
         } else {
-            ESP_LOGI(TAG, "  %s", menu_items[i]);
+
+            display_draw_text(
+                12,
+                y,
+                menu_items[i],
+                COLOR_WHITE,
+                COLOR_BLACK,
+                2
+            );
         }
     }
-
-    ESP_LOGI(TAG, "Selection: %d", menu_selection);
 }
 
 
-static void show_now_playing(void)
+/*
+ * --------------------------------------------------
+ * NOW PLAYING
+ * --------------------------------------------------
+ */
+
+static void render_now_playing(void)
 {
-    ESP_LOGI(TAG, "----- NOW PLAYING -----");
-    ESP_LOGI(TAG, "Track: Example Song");
-    ESP_LOGI(TAG, "Artist: Example Artist");
-    ESP_LOGI(TAG, "Album: Example Album");
+    display_clear(COLOR_BLACK);
+
+    display_draw_text(
+        10,
+        10,
+        "NOW PLAYING",
+        COLOR_GREEN,
+        COLOR_BLACK,
+        2
+    );
+
+    display_draw_text(
+        10,
+        70,
+        "EXAMPLE SONG",
+        COLOR_WHITE,
+        COLOR_BLACK,
+        2
+    );
+
+    display_draw_text(
+        10,
+        105,
+        "EXAMPLE ARTIST",
+        COLOR_WHITE,
+        COLOR_BLACK,
+        2
+    );
+
+    display_draw_text(
+        10,
+        140,
+        "EXAMPLE ALBUM",
+        COLOR_WHITE,
+        COLOR_BLACK,
+        2
+    );
+
+    /*
+     * Placeholder progress bar.
+     */
+    display_fill_rect(
+        10,
+        210,
+        220,
+        5,
+        COLOR_WHITE
+    );
+
+    display_fill_rect(
+        10,
+        210,
+        80,
+        5,
+        COLOR_GREEN
+    );
+
+    display_draw_text(
+        10,
+        230,
+        "1:24",
+        COLOR_WHITE,
+        COLOR_BLACK,
+        2
+    );
+
+    display_draw_text(
+        175,
+        230,
+        "3:45",
+        COLOR_WHITE,
+        COLOR_BLACK,
+        2
+    );
 }
 
+
+/*
+ * --------------------------------------------------
+ * PUBLIC UI FUNCTIONS
+ * --------------------------------------------------
+ */
 
 void ui_init(void)
 {
     current_screen = UI_MENU;
     menu_selection = 0;
 
-    show_menu();
+    ui_render();
 
     ESP_LOGI(TAG, "UI initialized");
+}
+
+
+void ui_render(void)
+{
+    switch (current_screen) {
+
+        case UI_MENU:
+            render_menu();
+            break;
+
+        case UI_NOW_PLAYING:
+            render_now_playing();
+            break;
+    }
 }
 
 
@@ -72,14 +226,13 @@ void ui_handle_event(button_event_t event)
                 case BUTTON_NONE:
                     break;
 
-
                 case BUTTON_UP:
 
                     if (menu_selection > 0) {
                         menu_selection--;
                     }
 
-                    show_menu();
+                    ui_render();
                     break;
 
 
@@ -89,7 +242,7 @@ void ui_handle_event(button_event_t event)
                         menu_selection++;
                     }
 
-                    show_menu();
+                    ui_render();
                     break;
 
 
@@ -101,33 +254,24 @@ void ui_handle_event(button_event_t event)
                         menu_items[menu_selection]
                     );
 
-                    /*
-                     * Temporary behavior:
-                     * selecting an item enters Now Playing.
-                     */
                     current_screen = UI_NOW_PLAYING;
 
-                    show_now_playing();
+                    ui_render();
                     break;
 
 
                 case BUTTON_RIGHT:
 
-                    /*
-                     * Menu specification:
-                     * RIGHT enters Now Playing.
-                     */
                     current_screen = UI_NOW_PLAYING;
 
-                    show_now_playing();
+                    ui_render();
                     break;
 
 
                 case BUTTON_LEFT:
 
                     /*
-                     * For now, LEFT just reports back.
-                     * Directory navigation will be added later.
+                     * No parent directory yet.
                      */
                     ESP_LOGI(TAG, "Back");
                     break;
@@ -166,8 +310,7 @@ void ui_handle_event(button_event_t event)
                 case BUTTON_CENTER_DOUBLE:
 
                     /*
-                     * Center double-click isn't used
-                     * in Menu View.
+                     * Not used from menu view.
                      */
                     break;
             }
@@ -209,13 +352,9 @@ void ui_handle_event(button_event_t event)
 
                 case BUTTON_CENTER_DOUBLE:
 
-                    /*
-                     * Double center-click returns
-                     * to Menu View.
-                     */
                     current_screen = UI_MENU;
 
-                    show_menu();
+                    ui_render();
                     break;
 
 
