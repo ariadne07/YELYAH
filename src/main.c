@@ -1,4 +1,3 @@
-#include "display.h"
 #include "sdcard.h"
 
 #include "esp_log.h"
@@ -9,22 +8,21 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Starting YELYAH");
 
-    /*
-     * This initializes SPI2_HOST.
-     */
-    display_init();
+    sdcard_init_detect();
 
-    /*
-     * SD uses the same SPI bus.
-     */
+    if (!sdcard_is_inserted()) {
+        ESP_LOGW(TAG, "No SD card detected");
+        return;
+    }
+
+    ESP_LOGI(TAG, "SD card detected");
+
     if (sdcard_init()) {
         ESP_LOGI(TAG, "SD card OK");
-
         sdcard_test();
     } else {
         ESP_LOGE(TAG, "SD card initialization failed");
     }
 
-    while (1) {
-    }
+    ESP_LOGI(TAG, "SD test complete");
 }

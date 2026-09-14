@@ -6,7 +6,3 @@ elf = ".pio/build/wokwi/firmware.elf"
 [[chip]]
 name = 'adafruit-pcm5102a'
 binary = 'chips/adafruit-pcm5102a.chip.wasm'
-
-[[chip]]
-name = 'adafruit-microsd'
-binary = 'chips/adafruit-microsd.chip.wasm'
