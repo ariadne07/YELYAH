@@ -1,0 +1,7 @@
+-Wno-frame-address
+-mlongcalls
+-fno-builtin-memcpy
+-fno-builtin-memset
+-fno-builtin-bzero
+"-specs=/Users/kayleemeier/Downloads/yelyah_mp3project/Simulations/YELYAH/build/specs/picolibc.specs"
+-fno-rtti
