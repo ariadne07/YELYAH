@@ -1,2 +1,2 @@
 dependencies:
-  espressif/esp_lcd_ili9341: "^1.0.0"
+  espressif/esp_lcd_ili9341: "2.1.0"

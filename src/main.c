@@ -1,9 +1,7 @@
-#include "buttons.h"
-#include "ui.h"
 #include "display.h"
+#include "sdcard.h"
 
 #include "esp_log.h"
-#include "esp_rom_sys.h"
 
 static const char *TAG = "MAIN";
 
@@ -11,22 +9,22 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Starting YELYAH");
 
-    buttons_init();
-
+    /*
+     * This initializes SPI2_HOST.
+     */
     display_init();
 
-    display_test_pattern();
+    /*
+     * SD uses the same SPI bus.
+     */
+    if (sdcard_init()) {
+        ESP_LOGI(TAG, "SD card OK");
 
-    ui_init();
+        sdcard_test();
+    } else {
+        ESP_LOGE(TAG, "SD card initialization failed");
+    }
 
     while (1) {
-
-        button_event_t event = buttons_get_event();
-
-        if (event != BUTTON_NONE) {
-            ui_handle_event(event);
-        }
-
-        esp_rom_delay_us(10000);
     }
 }

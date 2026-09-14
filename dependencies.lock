@@ -29,6 +29,6 @@ dependencies:
     version: 6.1.0
 direct_dependencies:
 - espressif/esp_lcd_ili9341
-manifest_hash: d07e103359c6b70f4ccc9778028cf10ebdd1c7c1230f8b3d7094befc2d09cd79
+manifest_hash: 10f0c03128438cbd0d572dab41497fcedd996f87296eab7ae989ddb3ba430d6f
 target: esp32s3
 version: 3.0.0
