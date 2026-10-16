@@ -6,3 +6,13 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+build/
+managed_components/
+sdcard/
+
+# Private Obsidian vault - never commit
+YELYAH_Documentation/
+.obsidian/
+
+# Config backups written by menuconfig
+*.old

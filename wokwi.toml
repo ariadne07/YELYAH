@@ -3,10 +3,19 @@ version = 1
 firmware = ".pio/build/wokwi/firmware.bin"
 elf = ".pio/build/wokwi/firmware.elf"
 
+# Custom chips (sources in chips/). Rebuild after editing:
+#   ~/.wokwi/bin/wokwi-cli chip compile chips/<name>.chip.c -o chips/<name>.chip.wasm
 [[chip]]
 name = 'adafruit-pcm5102a'
 binary = 'chips/adafruit-pcm5102a.chip.wasm'
 
 [[chip]]
-name = 'adafruit-microsd'
-binary = 'chips/adafruit-microsd.chip.wasm'
+name = 'lipo-battery'
+binary = 'chips/lipo-battery.chip.wasm'
+
+# The SD card stands in for the display board's microSD
+# slot, filled from the sdcard/ folder at each simulation
+# start. Generate test music with: python tools/make_test_music.py
+[[sdcard]]
+folder = 'sdcard'
+size = '32M'

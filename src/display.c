@@ -9,6 +9,8 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_ili9341.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -20,18 +22,6 @@ static const char *TAG = "DISPLAY";
 static esp_lcd_panel_io_handle_t io_handle = NULL;
 static esp_lcd_panel_handle_t panel_handle = NULL;
 
-/* -------------------------------------------------------------------------- */
-/* Display constants                                                          */
-/* -------------------------------------------------------------------------- */
-
-#define DISPLAY_WIDTH  240
-#define DISPLAY_HEIGHT 320
-
-#define COLOR_BLACK 0x0000
-#define COLOR_WHITE 0xFFFF
-#define COLOR_RED   0xF800
-#define COLOR_GREEN 0x07E0
-#define COLOR_BLUE  0x001F
 
 /* -------------------------------------------------------------------------- */
 /* 5x7 font                                                                   */
@@ -217,74 +207,132 @@ static const uint8_t glyph_exclamation[5] = {
 0x00, 0x00, 0x5F, 0x00, 0x00
 };
 
+static const uint8_t glyph_comma[5] = {
+0x00, 0x50, 0x30, 0x00, 0x00
+};
+
+static const uint8_t glyph_apostrophe[5] = {
+0x00, 0x05, 0x03, 0x00, 0x00
+};
+
+static const uint8_t glyph_paren_open[5] = {
+0x00, 0x1C, 0x22, 0x41, 0x00
+};
+
+static const uint8_t glyph_paren_close[5] = {
+0x00, 0x41, 0x22, 0x1C, 0x00
+};
+
+static const uint8_t glyph_ampersand[5] = {
+0x36, 0x49, 0x55, 0x22, 0x50
+};
+
+static const uint8_t glyph_underscore[5] = {
+0x40, 0x40, 0x40, 0x40, 0x40
+};
+
+static const uint8_t glyph_plus[5] = {
+0x08, 0x08, 0x3E, 0x08, 0x08
+};
+
+static const uint8_t glyph_greater[5] = {
+0x41, 0x22, 0x14, 0x08, 0x00
+};
+
+static const uint8_t glyph_less[5] = {
+0x00, 0x08, 0x14, 0x22, 0x41
+};
+
+static const uint8_t glyph_bar[5] = {
+0x00, 0x00, 0x7F, 0x00, 0x00
+};
+
+static const uint8_t glyph_percent[5] = {
+0x23, 0x13, 0x08, 0x64, 0x62
+};
+
+static const uint8_t glyph_hash[5] = {
+0x14, 0x7F, 0x14, 0x7F, 0x14
+};
+
+static const uint8_t glyph_equals[5] = {
+0x14, 0x14, 0x14, 0x14, 0x14
+};
+
 /* -------------------------------------------------------------------------- */
 /* Font lookup                                                                */
 /* -------------------------------------------------------------------------- */
 
 static const uint8_t *get_glyph(char character)
 {
-if (
-character >= 'a' &&
-character <= 'z'
-) {
-character =
-(char)(character - 'a' + 'A');
-}
+    if (character >= 'a' && character <= 'z') {
+        character = (char)(character - 'a' + 'A');
+    }
 
+    switch (character) {
 
-switch (character) {
+        case 'A': return glyph_A;
+        case 'B': return glyph_B;
+        case 'C': return glyph_C;
+        case 'D': return glyph_D;
+        case 'E': return glyph_E;
+        case 'F': return glyph_F;
+        case 'G': return glyph_G;
+        case 'H': return glyph_H;
+        case 'I': return glyph_I;
+        case 'J': return glyph_J;
+        case 'K': return glyph_K;
+        case 'L': return glyph_L;
+        case 'M': return glyph_M;
+        case 'N': return glyph_N;
+        case 'O': return glyph_O;
+        case 'P': return glyph_P;
+        case 'Q': return glyph_Q;
+        case 'R': return glyph_R;
+        case 'S': return glyph_S;
+        case 'T': return glyph_T;
+        case 'U': return glyph_U;
+        case 'V': return glyph_V;
+        case 'W': return glyph_W;
+        case 'X': return glyph_X;
+        case 'Y': return glyph_Y;
+        case 'Z': return glyph_Z;
 
-    case 'A': return glyph_A;
-    case 'B': return glyph_B;
-    case 'C': return glyph_C;
-    case 'D': return glyph_D;
-    case 'E': return glyph_E;
-    case 'F': return glyph_F;
-    case 'G': return glyph_G;
-    case 'H': return glyph_H;
-    case 'I': return glyph_I;
-    case 'J': return glyph_J;
-    case 'K': return glyph_K;
-    case 'L': return glyph_L;
-    case 'M': return glyph_M;
-    case 'N': return glyph_N;
-    case 'O': return glyph_O;
-    case 'P': return glyph_P;
-    case 'Q': return glyph_Q;
-    case 'R': return glyph_R;
-    case 'S': return glyph_S;
-    case 'T': return glyph_T;
-    case 'U': return glyph_U;
-    case 'V': return glyph_V;
-    case 'W': return glyph_W;
-    case 'X': return glyph_X;
-    case 'Y': return glyph_Y;
-    case 'Z': return glyph_Z;
+        case '0': return glyph_0;
+        case '1': return glyph_1;
+        case '2': return glyph_2;
+        case '3': return glyph_3;
+        case '4': return glyph_4;
+        case '5': return glyph_5;
+        case '6': return glyph_6;
+        case '7': return glyph_7;
+        case '8': return glyph_8;
+        case '9': return glyph_9;
 
-    case '0': return glyph_0;
-    case '1': return glyph_1;
-    case '2': return glyph_2;
-    case '3': return glyph_3;
-    case '4': return glyph_4;
-    case '5': return glyph_5;
-    case '6': return glyph_6;
-    case '7': return glyph_7;
-    case '8': return glyph_8;
-    case '9': return glyph_9;
+        case '-': return glyph_dash;
+        case '.': return glyph_period;
+        case ':': return glyph_colon;
+        case '/': return glyph_slash;
+        case '?': return glyph_question;
+        case '!': return glyph_exclamation;
+        case ',': return glyph_comma;
+        case '\'': return glyph_apostrophe;
+        case '(': return glyph_paren_open;
+        case ')': return glyph_paren_close;
+        case '&': return glyph_ampersand;
+        case '_': return glyph_underscore;
+        case '+': return glyph_plus;
+        case '>': return glyph_greater;
+        case '<': return glyph_less;
+        case '|': return glyph_bar;
+        case '%': return glyph_percent;
+        case '#': return glyph_hash;
+        case '=': return glyph_equals;
 
-    case '-': return glyph_dash;
-    case '.': return glyph_period;
-    case ':': return glyph_colon;
-    case '/': return glyph_slash;
-    case '?': return glyph_question;
-    case '!': return glyph_exclamation;
-
-    case ' ':
-    default:
-        return glyph_space;
-}
-
-
+        case ' ':
+        default:
+            return glyph_space;
+    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -293,10 +341,67 @@ switch (character) {
 
 static uint16_t swap_rgb565_bytes(uint16_t color)
 {
-return (uint16_t)(
-((color & 0x00FF) << 8) |
-((color & 0xFF00) >> 8)
-);
+    return (uint16_t)(
+        ((color & 0x00FF) << 8) |
+        ((color & 0xFF00) >> 8)
+    );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Synchronous bitmap transfer                                                */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * esp_lcd sends pixel data in the background. The
+ * source buffer must not change until that transfer
+ * finishes, so every draw waits for this semaphore
+ * (given from the "color transfer done" interrupt)
+ * before the buffer is reused.
+ */
+static SemaphoreHandle_t transfer_done = NULL;
+
+/*
+ * Scratch pixel buffer shared by all drawing functions.
+ * Big enough for a full-width band of rows, or one
+ * character at scale 4.
+ */
+#define DRAW_BUFFER_PIXELS (DISPLAY_WIDTH * 16)
+
+static uint16_t draw_buffer[DRAW_BUFFER_PIXELS];
+
+static bool on_color_transfer_done(
+    esp_lcd_panel_io_handle_t panel_io,
+    esp_lcd_panel_io_event_data_t *event_data,
+    void *user_ctx
+)
+{
+    BaseType_t higher_priority_woken = pdFALSE;
+
+    xSemaphoreGiveFromISR(transfer_done, &higher_priority_woken);
+
+    return higher_priority_woken == pdTRUE;
+}
+
+static void draw_bitmap_sync(
+    int x_start,
+    int y_start,
+    int x_end,
+    int y_end,
+    const void *pixels
+)
+{
+    ESP_ERROR_CHECK(
+        esp_lcd_panel_draw_bitmap(
+            panel_handle,
+            x_start,
+            y_start,
+            x_end,
+            y_end,
+            pixels
+        )
+    );
+
+    xSemaphoreTake(transfer_done, portMAX_DELAY);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -305,156 +410,111 @@ return (uint16_t)(
 
 void display_init(void)
 {
-esp_err_t ret;
+    esp_err_t ret;
 
-#ifndef WOKWI
+    transfer_done = xSemaphoreCreateBinary();
 
+    /*
+     * Backlight on. (The board pulls BL high by itself,
+     * but driving it lets us dim/switch it off later.)
+     */
+    gpio_config_t bl_config = {
+        .pin_bit_mask = 1ULL << LCD_BL,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
 
-/*
- * Real hardware backlight.
- */
-gpio_config_t bl_config = {
-    .pin_bit_mask = 1ULL << LCD_BL,
-    .mode = GPIO_MODE_OUTPUT,
-    .pull_up_en = GPIO_PULLUP_DISABLE,
-    .pull_down_en = GPIO_PULLDOWN_DISABLE,
-    .intr_type = GPIO_INTR_DISABLE
-};
+    ret = gpio_config(&bl_config);
+    ESP_ERROR_CHECK(ret);
 
-ret = gpio_config(&bl_config);
-ESP_ERROR_CHECK(ret);
+    ret = gpio_set_level(LCD_BL, 1);
+    ESP_ERROR_CHECK(ret);
 
-ret = gpio_set_level(LCD_BL, 1);
-ESP_ERROR_CHECK(ret);
+    /*
+     * SPI bus, shared by the LCD and the SD card.
+     * The LCD never reads back, but the SD card needs MISO.
+     */
+    spi_bus_config_t bus_config = {
+        .sclk_io_num = LCD_CLK,
+        .mosi_io_num = LCD_DIN,
+        .miso_io_num = SD_SO,
 
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
 
-#endif
+        .max_transfer_sz = DRAW_BUFFER_PIXELS * sizeof(uint16_t)
+    };
 
+    ret = spi_bus_initialize(
+        SPI2_HOST,
+        &bus_config,
+        SPI_DMA_CH_AUTO
+    );
+    ESP_ERROR_CHECK(ret);
 
-/*
- * SPI bus.
- *
- * LCD and SD eventually share SPI2.
- */
-spi_bus_config_t bus_config = {
-    .sclk_io_num = LCD_CLK,
-    .mosi_io_num = LCD_DIN,
-    .miso_io_num = -1,
+    /*
+     * LCD SPI interface.
+     */
+    esp_lcd_panel_io_spi_config_t io_config = {
+        .dc_gpio_num = LCD_DC,
+        .cs_gpio_num = LCD_CS,
 
-    .quadwp_io_num = -1,
-    .quadhd_io_num = -1,
+        .pclk_hz = 20 * 1000 * 1000,
 
-    .max_transfer_sz =
-        DISPLAY_WIDTH *
-        DISPLAY_HEIGHT *
-        sizeof(uint16_t)
-};
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
 
+        .spi_mode = 0,
 
-ret = spi_bus_initialize(
-    SPI2_HOST,
-    &bus_config,
-    SPI_DMA_CH_AUTO
-);
+        .trans_queue_depth = 10,
 
-ESP_ERROR_CHECK(ret);
+        .on_color_trans_done = on_color_transfer_done,
+    };
 
+    ret = esp_lcd_new_panel_io_spi(
+        (esp_lcd_spi_bus_handle_t)SPI2_HOST,
+        &io_config,
+        &io_handle
+    );
+    ESP_ERROR_CHECK(ret);
 
-/*
- * LCD SPI interface.
- */
-esp_lcd_panel_io_spi_config_t io_config = {
-    .dc_gpio_num = LCD_DC,
-    .cs_gpio_num = LCD_CS,
+    /*
+     * ILI9341 panel.
+     */
+    esp_lcd_panel_dev_config_t panel_config = {
+        .reset_gpio_num = LCD_RST,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = 16
+    };
 
-    .pclk_hz = 20 * 1000 * 1000,
+    ret = esp_lcd_new_panel_ili9341(
+        io_handle,
+        &panel_config,
+        &panel_handle
+    );
+    ESP_ERROR_CHECK(ret);
 
-    .lcd_cmd_bits = 8,
-    .lcd_param_bits = 8,
+    ret = esp_lcd_panel_reset(panel_handle);
+    ESP_ERROR_CHECK(ret);
 
-    .spi_mode = 0,
+    ret = esp_lcd_panel_init(panel_handle);
+    ESP_ERROR_CHECK(ret);
 
-    .trans_queue_depth = 10
-};
+    ret = esp_lcd_panel_disp_on_off(panel_handle, true);
+    ESP_ERROR_CHECK(ret);
 
+    /*
+     * Keep the same basic orientation you had working.
+     */
+    ret = esp_lcd_panel_swap_xy(panel_handle, false);
+    ESP_ERROR_CHECK(ret);
 
-ret = esp_lcd_new_panel_io_spi(
-    (esp_lcd_spi_bus_handle_t)SPI2_HOST,
-    &io_config,
-    &io_handle
-);
+    ret = esp_lcd_panel_mirror(panel_handle, true, false);
+    ESP_ERROR_CHECK(ret);
 
-ESP_ERROR_CHECK(ret);
-
-
-/*
- * ILI9341 panel.
- */
-esp_lcd_panel_dev_config_t panel_config = {
-    .reset_gpio_num = -1,
-    .rgb_ele_order =
-        LCD_RGB_ELEMENT_ORDER_RGB,
-    .bits_per_pixel = 16
-};
-
-
-ret = esp_lcd_new_panel_ili9341(
-    io_handle,
-    &panel_config,
-    &panel_handle
-);
-
-ESP_ERROR_CHECK(ret);
-
-
-ret = esp_lcd_panel_reset(
-    panel_handle
-);
-
-ESP_ERROR_CHECK(ret);
-
-
-ret = esp_lcd_panel_init(
-    panel_handle
-);
-
-ESP_ERROR_CHECK(ret);
-
-
-ret = esp_lcd_panel_disp_on_off(
-    panel_handle,
-    true
-);
-
-ESP_ERROR_CHECK(ret);
-
-
-/*
- * Keep the same basic orientation you had working.
- */
-ret = esp_lcd_panel_swap_xy(
-    panel_handle,
-    false
-);
-
-ESP_ERROR_CHECK(ret);
-
-
-ret = esp_lcd_panel_mirror(
-    panel_handle,
-    true,
-    false
-);
-
-ESP_ERROR_CHECK(ret);
-
-
-ESP_LOGI(
-    TAG,
-    "Display initialized"
-);
-
-
+    ESP_LOGI(TAG, "Display initialized");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -469,94 +529,67 @@ int height,
 uint16_t color
 )
 {
-if (panel_handle == NULL) {
-return;
-}
+    if (panel_handle == NULL) {
+        return;
+    }
 
+    /*
+     * Clip rectangle to display.
+     */
+    if (x < 0) {
+        width += x;
+        x = 0;
+    }
 
-/*
- * Clip rectangle to display.
- */
-if (x < 0) {
-    width += x;
-    x = 0;
-}
+    if (y < 0) {
+        height += y;
+        y = 0;
+    }
 
+    if (x + width > DISPLAY_WIDTH) {
+        width = DISPLAY_WIDTH - x;
+    }
 
-if (y < 0) {
-    height += y;
-    y = 0;
-}
+    if (y + height > DISPLAY_HEIGHT) {
+        height = DISPLAY_HEIGHT - y;
+    }
 
+    if (width <= 0 || height <= 0) {
+        return;
+    }
 
-if (
-    x + width >
-    DISPLAY_WIDTH
-) {
-    width =
-        DISPLAY_WIDTH - x;
-}
+    /*
+     * Send as many whole rows per transfer as fit
+     * in the scratch buffer.
+     */
+    int rows_per_chunk = DRAW_BUFFER_PIXELS / width;
 
+    if (rows_per_chunk > height) {
+        rows_per_chunk = height;
+    }
 
-if (
-    y + height >
-    DISPLAY_HEIGHT
-) {
-    height =
-        DISPLAY_HEIGHT - y;
-}
+    uint16_t spi_color = swap_rgb565_bytes(color);
 
+    for (int i = 0; i < width * rows_per_chunk; i++) {
+        draw_buffer[i] = spi_color;
+    }
 
-if (
-    width <= 0 ||
-    height <= 0
-) {
-    return;
-}
+    for (int row = 0; row < height; row += rows_per_chunk) {
 
+        int rows = rows_per_chunk;
 
-/*
- * One row at a time keeps memory use small.
- */
-static uint16_t line[DISPLAY_WIDTH];
+        if (row + rows > height) {
+            rows = height - row;
+        }
 
-
-uint16_t spi_color =
-    swap_rgb565_bytes(color);
-
-
-for (
-    int i = 0;
-    i < width;
-    i++
-) {
-    line[i] = spi_color;
-}
-
-
-for (
-    int row = 0;
-    row < height;
-    row++
-) {
-
-    esp_err_t ret =
-        esp_lcd_panel_draw_bitmap(
-            panel_handle,
-
+        draw_bitmap_sync(
             x,
             y + row,
-
             x + width,
-            y + row + 1,
-
-            line
+            y + row + rows,
+            draw_buffer
         );
-
-    ESP_ERROR_CHECK(ret);
-}
-
-
+    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -565,13 +598,13 @@ for (
 
 void display_clear(uint16_t color)
 {
-display_fill_rect(
-0,
-0,
-DISPLAY_WIDTH,
-DISPLAY_HEIGHT,
-color
-);
+    display_fill_rect(
+        0,
+        0,
+        DISPLAY_WIDTH,
+        DISPLAY_HEIGHT,
+        color
+    );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -584,48 +617,18 @@ int y,
 uint16_t color
 )
 {
-if (panel_handle == NULL) {
-return;
-}
-
-
-if (
-    x < 0 ||
-    x >= DISPLAY_WIDTH ||
-    y < 0 ||
-    y >= DISPLAY_HEIGHT
-) {
-    return;
-}
-
-
-uint16_t pixel =
-    swap_rgb565_bytes(color);
-
-
-esp_err_t ret =
-    esp_lcd_panel_draw_bitmap(
-        panel_handle,
-
-        x,
-        y,
-
-        x + 1,
-        y + 1,
-
-        &pixel
-    );
-
-
-ESP_ERROR_CHECK(ret);
-
-
+    display_fill_rect(x, y, 1, 1, color);
 }
 
 /* -------------------------------------------------------------------------- */
 /* Draw character                                                             */
 /* -------------------------------------------------------------------------- */
 
+/*
+ * Renders the whole character cell (glyph plus the
+ * blank spacing column) into the scratch buffer and
+ * sends it in a single transfer.
+ */
 static void display_draw_char(
 int x,
 int y,
@@ -635,68 +638,55 @@ uint16_t bg_color,
 int scale
 )
 {
-if (scale < 1) {
-scale = 1;
-}
-
-
-const uint8_t *glyph =
-    get_glyph(character);
-
-
-/*
- * Five font columns.
- */
-for (
-    int column = 0;
-    column < 5;
-    column++
-) {
-
-    uint8_t bits =
-        glyph[column];
-
-
-    for (
-        int row = 0;
-        row < 7;
-        row++
-    ) {
-
-        bool pixel_on =
-            (bits &
-             (1U << row)) != 0;
-
-
-        uint16_t pixel_color =
-            pixel_on
-                ? color
-                : bg_color;
-
-
-        display_fill_rect(
-            x + column * scale,
-            y + row * scale,
-            scale,
-            scale,
-            pixel_color
-        );
+    if (scale < 1) {
+        scale = 1;
     }
-}
 
+    int cell_width = FONT_CHAR_WIDTH * scale;
+    int cell_height = FONT_CHAR_HEIGHT * scale;
 
-/*
- * One blank column between characters.
- */
-display_fill_rect(
-    x + 5 * scale,
-    y,
-    scale,
-    7 * scale,
-    bg_color
-);
+    /*
+     * Characters must be fully on screen and fit
+     * in the scratch buffer.
+     */
+    if (
+        x < 0 ||
+        y < 0 ||
+        x + cell_width > DISPLAY_WIDTH ||
+        y + cell_height > DISPLAY_HEIGHT ||
+        cell_width * cell_height > DRAW_BUFFER_PIXELS
+    ) {
+        return;
+    }
 
+    const uint8_t *glyph = get_glyph(character);
 
+    uint16_t fg = swap_rgb565_bytes(color);
+    uint16_t bg = swap_rgb565_bytes(bg_color);
+
+    for (int py = 0; py < cell_height; py++) {
+
+        int row = py / scale;
+
+        for (int px = 0; px < cell_width; px++) {
+
+            int column = px / scale;
+
+            bool pixel_on =
+                column < 5 &&
+                (glyph[column] & (1U << row)) != 0;
+
+            draw_buffer[py * cell_width + px] = pixel_on ? fg : bg;
+        }
+    }
+
+    draw_bitmap_sync(
+        x,
+        y,
+        x + cell_width,
+        y + cell_height,
+        draw_buffer
+    );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -712,103 +702,44 @@ uint16_t bg_color,
 int scale
 )
 {
-if (
-text == NULL ||
-panel_handle == NULL
-) {
-return;
-}
-
-
-if (scale < 1) {
-    scale = 1;
-}
-
-
-int cursor_x = x;
-
-
-while (*text != '\0') {
-
-    /*
-     * Wrap to the next line if necessary.
-     */
-    if (
-        cursor_x +
-        (6 * scale) >
-        DISPLAY_WIDTH
-    ) {
-
-        cursor_x = x;
-        y += 8 * scale;
+    if (text == NULL || panel_handle == NULL) {
+        return;
     }
 
-
-    /*
-     * Stop if we're below the display.
-     */
-    if (
-        y >= DISPLAY_HEIGHT
-    ) {
-        break;
+    if (scale < 1) {
+        scale = 1;
     }
 
+    int cursor_x = x;
 
-    display_draw_char(
-        cursor_x,
-        y,
-        *text,
-        color,
-        bg_color,
-        scale
-    );
+    while (*text != '\0') {
 
+        /*
+         * Wrap to the next line if necessary.
+         */
+        if (cursor_x + (FONT_CHAR_WIDTH * scale) > DISPLAY_WIDTH) {
+            cursor_x = x;
+            y += 8 * scale;
+        }
 
-    cursor_x +=
-        6 * scale;
+        /*
+         * Stop if we're below the display.
+         */
+        if (y >= DISPLAY_HEIGHT) {
+            break;
+        }
 
+        display_draw_char(
+            cursor_x,
+            y,
+            *text,
+            color,
+            bg_color,
+            scale
+        );
 
-    text++;
+        cursor_x += FONT_CHAR_WIDTH * scale;
+
+        text++;
+    }
 }
-
-
-}
-
-/* -------------------------------------------------------------------------- */
-/* Convenience fill function                                                  */
-/* -------------------------------------------------------------------------- */
-
-void display_fill(uint16_t color)
-{
-display_clear(color);
-}
-
-/* -------------------------------------------------------------------------- */
-/* Display test pattern                                                       */
-/* -------------------------------------------------------------------------- */
-
-void display_test_pattern(void)
-{
-display_fill(COLOR_RED);
-display_fill(COLOR_GREEN);
-display_fill(COLOR_BLUE);
-display_fill(COLOR_WHITE);
-display_fill(COLOR_BLACK);
-
-
-ESP_LOGI(
-    TAG,
-    "Display test pattern complete"
-);
-
-
-}
-
-/*
-
-* Keep the old public test name available if some other file still calls it.
-  */
-  void display_show_test(void)
-  {
-  display_test_pattern();
-  }

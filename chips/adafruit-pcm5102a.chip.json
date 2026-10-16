@@ -1,5 +1,5 @@
 {
-  "name": "adafruit-pcm5102a",
+  "name": "Adafruit PCM5102 DAC",
   "author": "Kaylee",
   "pins": [
     "VIN",
@@ -18,8 +18,8 @@
     "3V"
   ],
   "controls": [],
-  "wasm": "adafruit-pcm5102a.chip.wasm",
-  "memory": {
-    "initial": 2
+  "display": {
+    "width": 32,
+    "height": 6
   }
 }
