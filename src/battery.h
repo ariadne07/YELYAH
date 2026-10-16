@@ -10,12 +10,13 @@
 
 #define BATTERY_LOW_MV      3400    // warn the user
 #define BATTERY_CRITICAL_MV 3200    // shut down before the cell's protection cuts in
+#define BATTERY_MIN_VALID_MV 2500   // anything lower is treated as a bad reading
 
 void battery_init(void);
 
 /*
  * Battery voltage in millivolts (averaged), or 0 if the
- * ADC isn't available.
+ * ADC isn't available or the reading is implausible.
  */
 int battery_read_mv(void);
 

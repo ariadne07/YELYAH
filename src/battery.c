@@ -11,8 +11,16 @@ static const char *TAG = "BATTERY";
 #define SAMPLES 8
 
 static adc_oneshot_unit_handle_t adc_handle = NULL;
+#ifndef WOKWI
 static adc_cali_handle_t cali_handle = NULL;
+#endif
 static adc_channel_t channel;
+
+/*
+ * Last averaged ADC reading, logged at startup to help
+ * check the conversion.
+ */
+static int last_raw = 0;
 
 
 void battery_init(void)
@@ -59,7 +67,9 @@ void battery_init(void)
     }
 #endif
 
-    ESP_LOGI(TAG, "Battery monitor on GPIO%d: %d mV", BATTERY_SENSE, battery_read_mv());
+    int mv = battery_read_mv();
+
+    ESP_LOGI(TAG, "Battery monitor on GPIO%d: %d mV (raw %d)", BATTERY_SENSE, mv, last_raw);
 }
 
 
@@ -85,16 +95,39 @@ int battery_read_mv(void)
     int raw = total / SAMPLES;
     int pin_mv;
 
+    last_raw = raw;
+
+#ifdef WOKWI
+    /*
+     * Wokwi's virtual ADCs use a 5 V reference for every
+     * MCU (docs.wokwi.com/chips-api/analog), so 0-5 V
+     * maps linearly onto 0-4095.
+     */
+    pin_mv = raw * 5000 / 4095;
+#else
     if (cali_handle == NULL ||
         adc_cali_raw_to_voltage(cali_handle, raw, &pin_mv) != ESP_OK) {
         /*
-         * Uncalibrated (and Wokwi, whose ADC maps
-         * 0-3.3 V linearly onto 0-4095).
+         * Uncalibrated: 12 dB attenuation reads roughly
+         * 0-3.1 V.
          */
-        pin_mv = raw * 3300 / 4095;
+        pin_mv = raw * 3100 / 4095;
+    }
+#endif
+
+    int battery_mv = pin_mv * BATTERY_DIVIDER_RATIO;
+
+    /*
+     * A cell powering the device can't really be this
+     * low, so the divider is missing or the reading is
+     * wrong. Report "unavailable" rather than letting it
+     * trigger a shutdown.
+     */
+    if (battery_mv < BATTERY_MIN_VALID_MV) {
+        return 0;
     }
 
-    return pin_mv * BATTERY_DIVIDER_RATIO;
+    return battery_mv;
 }
 
 
