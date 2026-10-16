@@ -13,7 +13,7 @@
  * Wokwi: the simulator does not implement I2S on the
  * ESP32-S3, so samples are discarded and the writer is
  * simply delayed for as long as the audio would take to
- * play. Everything upstream (SD reads, WAV parsing,
+ * play. Everything upstream (SD reads, MP3 decoding,
  * timing, UI) behaves the same as on hardware.
  */
 

@@ -505,7 +505,7 @@ static void draw_empty_message(void)
     }
 
     display_draw_text(MARGIN, y, "No music found", COLOR_WHITE, COLOR_BLACK, TEXT_SCALE);
-    display_draw_text(MARGIN, y + 30, "Add 16-bit WAV files to",
+    display_draw_text(MARGIN, y + 30, "Add MP3 files to",
                       COLOR_GREY, COLOR_BLACK, 1);
     display_draw_text(MARGIN, y + 42, "/Music/Artist/Album/",
                       COLOR_GREY, COLOR_BLACK, 1);

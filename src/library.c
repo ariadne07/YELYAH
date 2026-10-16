@@ -76,17 +76,17 @@ static int find_or_add_album(const char *name, int artist)
  * --------------------------------------------------
  */
 
-static bool is_wav_file(const char *file_name)
+static bool is_mp3_file(const char *file_name)
 {
     size_t len = strlen(file_name);
 
     return len > 4 &&
-           strcasecmp(file_name + len - 4, ".wav") == 0;
+           strcasecmp(file_name + len - 4, ".mp3") == 0;
 }
 
 
 /*
- * "03 - Night Drive.wav" -> "Night Drive"
+ * "03 - Night Drive.mp3" -> "Night Drive"
  */
 static void title_from_file_name(const char *file_name, char *title)
 {
@@ -117,7 +117,7 @@ static void title_from_file_name(const char *file_name, char *title)
      */
     char *dot = strrchr(title, '.');
 
-    if (dot != NULL && strcasecmp(dot, ".wav") == 0) {
+    if (dot != NULL && strcasecmp(dot, ".mp3") == 0) {
         *dot = '\0';
     }
 }
@@ -204,7 +204,7 @@ static void scan_dir(
                 scan_dir(path, 2, artist_name, entry->d_name);
             }
 
-        } else if (is_wav_file(entry->d_name)) {
+        } else if (is_mp3_file(entry->d_name)) {
 
             add_track(path, entry->d_name, artist_name, album_name);
         }

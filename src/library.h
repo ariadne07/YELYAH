@@ -6,7 +6,7 @@
  *
  * Expected layout:
  *
- *   /sdcard/Music/<Artist>/<Album>/<NN Title>.wav
+ *   /sdcard/Music/<Artist>/<Album>/<NN Title>.mp3
  *
  * Files placed directly in an artist folder go in
  * "Unknown Album"; files directly in /Music go under

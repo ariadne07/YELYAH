@@ -11,12 +11,21 @@
 #include <stdio.h>
 #include <string.h>
 
+/*
+ * minimp3 (public domain): header-only MP3 decoder.
+ * Layers I/II are compiled out; only MP3 is needed.
+ */
+#define MINIMP3_IMPLEMENTATION
+#define MINIMP3_ONLY_MP3
+#include "third_party/minimp3.h"
+
 static const char *TAG = "PLAYER";
 
 /*
- * Frames read from the SD card per loop iteration.
+ * minimp3 keeps ~16 KB of scratch space on the stack
+ * while decoding a frame.
  */
-#define CHUNK_FRAMES 512
+#define PLAYER_TASK_STACK (32 * 1024)
 
 /*
  * "Previous" restarts the current track instead of
@@ -64,22 +73,38 @@ static int32_t seek_request_ms = -1;
  * --------------------------------------------------
  */
 
+/*
+ * Compressed-data buffer. minimp3 confirms it has found
+ * a real frame by checking that more frames follow, so
+ * this holds several at a time (a 320 kbps frame is
+ * about 1.4 KB). It is topped up once less than
+ * INPUT_REFILL_BYTES remain unread.
+ */
+#define INPUT_BUFFER_BYTES (16 * 1024)
+#define INPUT_REFILL_BYTES (8 * 1024)
+
 typedef struct {
     FILE *file;
 
+    long data_start;            // first byte after any ID3v2 tag
+    uint32_t data_size;         // audio bytes, excluding ID3 tags
+    uint32_t data_read;         // audio bytes read from the file so far
+
     uint32_t sample_rate;
-    uint16_t channels;
-    uint16_t block_align;
+    uint32_t duration_ms;       // 0 if unknown
+    uint64_t frames_played;     // PCM frames (one sample per channel)
 
-    long data_start;
-    uint32_t data_size;
-    uint32_t data_read;
-} wav_t;
+    size_t in_pos;              // next unread byte in `input`
+    size_t in_len;              // valid bytes in `input`
 
-static wav_t wav = {0};
+    mp3dec_t decoder;
+} mp3_t;
 
-static int16_t read_buffer[CHUNK_FRAMES * 2];
-static int16_t out_buffer[CHUNK_FRAMES * 2];
+static mp3_t mp3 = {0};
+
+static uint8_t input[INPUT_BUFFER_BYTES];
+static int16_t pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
+static int16_t out_buffer[MINIMP3_MAX_SAMPLES_PER_FRAME];
 
 
 /*
@@ -182,215 +207,327 @@ static void wake_player(void)
 
 /*
  * --------------------------------------------------
- * WAV FILES (player task only)
+ * MP3 FILES (player task only)
  * --------------------------------------------------
  */
 
-static void close_wav(void)
+static void close_mp3(void)
 {
-    if (wav.file != NULL) {
-        fclose(wav.file);
+    if (mp3.file != NULL) {
+        fclose(mp3.file);
     }
 
-    memset(&wav, 0, sizeof(wav));
+    memset(&mp3, 0, sizeof(mp3));
 }
 
 
-static uint16_t read_u16(const uint8_t *bytes)
+static uint32_t read_be32(const uint8_t *bytes)
 {
-    return (uint16_t)(bytes[0] | (bytes[1] << 8));
-}
-
-
-static uint32_t read_u32(const uint8_t *bytes)
-{
-    return (uint32_t)bytes[0] |
-           ((uint32_t)bytes[1] << 8) |
-           ((uint32_t)bytes[2] << 16) |
-           ((uint32_t)bytes[3] << 24);
+    return ((uint32_t)bytes[0] << 24) |
+           ((uint32_t)bytes[1] << 16) |
+           ((uint32_t)bytes[2] << 8) |
+           (uint32_t)bytes[3];
 }
 
 
 /*
- * Opens a 16-bit PCM WAV file (mono or stereo, any
- * sample rate) and positions it at the audio data.
+ * Moves unread bytes to the front of the buffer and
+ * reads more audio data after them. Returns false if
+ * nothing more could be read.
  */
-static bool open_wav(const char *path)
+static bool fill_input(void)
 {
-    close_wav();
+    size_t unread = mp3.in_len - mp3.in_pos;
 
-    wav.file = fopen(path, "rb");
+    memmove(input, input + mp3.in_pos, unread);
+    mp3.in_pos = 0;
+    mp3.in_len = unread;
 
-    if (wav.file == NULL) {
+    size_t space = INPUT_BUFFER_BYTES - mp3.in_len;
+    size_t remaining = mp3.data_size - mp3.data_read;
+    size_t want = (space < remaining) ? space : remaining;
+
+    if (want == 0) {
+        return false;
+    }
+
+    size_t got = fread(input + mp3.in_len, 1, want, mp3.file);
+
+    mp3.in_len += got;
+    mp3.data_read += got;
+
+    return got > 0;
+}
+
+
+/*
+ * VBR files carry a "Xing" (or "Info") header in their
+ * first frame with the total frame count, which gives an
+ * exact duration. Returns 0 if there isn't one.
+ */
+static uint32_t xing_frame_count(const uint8_t *frame, size_t length)
+{
+    if (length < 4) {
+        return 0;
+    }
+
+    bool mpeg1 = (frame[1] & 0x08) != 0;
+    bool mono = (frame[3] & 0xC0) == 0xC0;
+    bool has_crc = (frame[1] & 0x01) == 0;
+
+    size_t pos = 4 + (has_crc ? 2 : 0) +
+                 (mpeg1 ? (mono ? 17 : 32) : (mono ? 9 : 17));
+
+    if (pos + 12 > length) {
+        return 0;
+    }
+
+    if (memcmp(frame + pos, "Xing", 4) != 0 &&
+        memcmp(frame + pos, "Info", 4) != 0) {
+        return 0;
+    }
+
+    uint32_t flags = read_be32(frame + pos + 4);
+
+    return (flags & 0x01) ? read_be32(frame + pos + 8) : 0;
+}
+
+
+/*
+ * Opens an MP3 file, skips its ID3 tags, and works out
+ * the sample rate and duration from the first frame.
+ */
+static bool open_mp3(const char *path)
+{
+    close_mp3();
+
+    mp3.file = fopen(path, "rb");
+
+    if (mp3.file == NULL) {
         ESP_LOGE(TAG, "Can't open %s", path);
         return false;
     }
 
-    uint8_t header[12];
-
-    if (fread(header, 1, 12, wav.file) != 12 ||
-        memcmp(header, "RIFF", 4) != 0 ||
-        memcmp(header + 8, "WAVE", 4) != 0) {
-        ESP_LOGE(TAG, "%s is not a WAV file", path);
-        close_wav();
-        return false;
-    }
-
-    bool have_format = false;
-    uint16_t bits_per_sample = 0;
+    fseek(mp3.file, 0, SEEK_END);
+    long file_size = ftell(mp3.file);
+    fseek(mp3.file, 0, SEEK_SET);
 
     /*
-     * Walk the chunks until we reach the audio data.
+     * ID3v2 tag at the start: "ID3", version, flags,
+     * then a 28-bit "syncsafe" size (7 bits per byte).
      */
-    for (;;) {
+    uint8_t header[10];
+    long audio_start = 0;
 
-        uint8_t chunk[8];
+    if (fread(header, 1, 10, mp3.file) == 10 && memcmp(header, "ID3", 3) == 0) {
 
-        if (fread(chunk, 1, 8, wav.file) != 8) {
-            ESP_LOGE(TAG, "%s has no audio data", path);
-            close_wav();
-            return false;
-        }
+        audio_start = 10 +
+            (((long)(header[6] & 0x7F) << 21) |
+             ((long)(header[7] & 0x7F) << 14) |
+             ((long)(header[8] & 0x7F) << 7) |
+             (long)(header[9] & 0x7F));
 
-        uint32_t chunk_size = read_u32(chunk + 4);
-
-        if (memcmp(chunk, "fmt ", 4) == 0) {
-
-            uint8_t format[16];
-
-            if (chunk_size < 16 || fread(format, 1, 16, wav.file) != 16) {
-                break;
-            }
-
-            uint16_t audio_format = read_u16(format);
-
-            wav.channels = read_u16(format + 2);
-            wav.sample_rate = read_u32(format + 4);
-            wav.block_align = read_u16(format + 12);
-            bits_per_sample = read_u16(format + 14);
-
-            /*
-             * 1 = PCM, 0xFFFE = WAVE_FORMAT_EXTENSIBLE
-             * (used by some editors for plain PCM too).
-             */
-            have_format =
-                (audio_format == 1 || audio_format == 0xFFFE) &&
-                bits_per_sample == 16 &&
-                (wav.channels == 1 || wav.channels == 2) &&
-                wav.sample_rate > 0;
-
-            /*
-             * Skip any extra format bytes (and the pad byte).
-             */
-            fseek(wav.file, (chunk_size - 16) + (chunk_size & 1), SEEK_CUR);
-
-        } else if (memcmp(chunk, "data", 4) == 0) {
-
-            wav.data_start = ftell(wav.file);
-            wav.data_size = chunk_size;
-            break;
-
-        } else {
-
-            fseek(wav.file, chunk_size + (chunk_size & 1), SEEK_CUR);
+        if (header[5] & 0x10) {
+            audio_start += 10;  // tag footer
         }
     }
 
-    if (!have_format || wav.data_size == 0) {
-        ESP_LOGE(
-            TAG,
-            "%s: unsupported format (need 16-bit PCM, got %u-bit, %u ch)",
-            path,
-            bits_per_sample,
-            wav.channels
-        );
-        close_wav();
+    /*
+     * ID3v1 tag: the last 128 bytes, starting "TAG".
+     */
+    long audio_end = file_size;
+
+    if (file_size >= 128) {
+
+        uint8_t tag[3];
+
+        fseek(mp3.file, file_size - 128, SEEK_SET);
+
+        if (fread(tag, 1, 3, mp3.file) == 3 && memcmp(tag, "TAG", 3) == 0) {
+            audio_end -= 128;
+        }
+    }
+
+    if (audio_end <= audio_start) {
+        ESP_LOGE(TAG, "%s has no audio data", path);
+        close_mp3();
         return false;
     }
+
+    mp3.data_start = audio_start;
+    mp3.data_size = (uint32_t)(audio_end - audio_start);
+
+    fseek(mp3.file, mp3.data_start, SEEK_SET);
+    fill_input();
+
+    /*
+     * Find the first frame without decoding it (pcm =
+     * NULL) to learn the format.
+     */
+    mp3dec_init(&mp3.decoder);
+
+    mp3dec_frame_info_t info;
+    int samples_per_frame = mp3dec_decode_frame(
+        &mp3.decoder, input, mp3.in_len, NULL, &info);
+
+    if (samples_per_frame == 0 || info.layer != 3) {
+        ESP_LOGE(TAG, "%s is not an MP3 file", path);
+        close_mp3();
+        return false;
+    }
+
+    mp3.sample_rate = info.hz;
+
+    uint32_t frame_count = xing_frame_count(
+        input + info.frame_offset, mp3.in_len - info.frame_offset);
+
+    if (frame_count > 0) {
+        mp3.duration_ms = (uint32_t)(
+            (uint64_t)frame_count * samples_per_frame * 1000 / info.hz);
+    } else if (info.bitrate_kbps > 0) {
+        /*
+         * Constant bitrate: bits / kbps = milliseconds.
+         */
+        mp3.duration_ms = (uint32_t)(
+            (uint64_t)mp3.data_size * 8 / info.bitrate_kbps);
+    }
+
+    /*
+     * Start decoding from the beginning of the buffer.
+     */
+    mp3dec_init(&mp3.decoder);
 
     ESP_LOGI(
         TAG,
-        "Playing %s (%lu Hz, %u ch)",
+        "Playing %s (%lu Hz, %d kbps, %lu s)",
         path,
-        (unsigned long)wav.sample_rate,
-        wav.channels
+        (unsigned long)info.hz,
+        info.bitrate_kbps,
+        (unsigned long)(mp3.duration_ms / 1000)
     );
 
     return true;
 }
 
 
-static uint32_t bytes_to_ms(uint32_t bytes)
+static uint32_t mp3_position_ms(void)
 {
-    uint64_t frames = bytes / wav.block_align;
-
-    return (uint32_t)(frames * 1000 / wav.sample_rate);
-}
-
-
-static void seek_wav(uint32_t ms)
-{
-    uint64_t frame = (uint64_t)ms * wav.sample_rate / 1000;
-    uint32_t offset = (uint32_t)(frame * wav.block_align);
-
-    if (offset > wav.data_size) {
-        offset = wav.data_size;
+    if (mp3.sample_rate == 0) {
+        return 0;
     }
 
-    fseek(wav.file, wav.data_start + offset, SEEK_SET);
-    wav.data_read = offset;
+    return (uint32_t)(mp3.frames_played * 1000 / mp3.sample_rate);
 }
 
 
 /*
- * Reads one chunk, converts it to stereo with volume
- * applied, and sends it to the output. Returns false
- * at the end of the track.
+ * Jumps to roughly `ms` by byte position, which is exact
+ * for constant-bitrate files and close for VBR. The
+ * decoder re-syncs on the next frame header.
+ */
+static void seek_mp3(uint32_t ms)
+{
+    uint32_t offset = 0;
+
+    if (mp3.duration_ms > 0) {
+        offset = (uint32_t)((uint64_t)mp3.data_size * ms / mp3.duration_ms);
+    }
+
+    if (offset > mp3.data_size) {
+        offset = mp3.data_size;
+    }
+
+    fseek(mp3.file, mp3.data_start + offset, SEEK_SET);
+
+    mp3.data_read = offset;
+    mp3.in_pos = 0;
+    mp3.in_len = 0;
+    mp3.frames_played = (uint64_t)ms * mp3.sample_rate / 1000;
+
+    mp3dec_init(&mp3.decoder);
+}
+
+
+/*
+ * Decodes one MP3 frame, converts it to stereo with
+ * volume applied, and sends it to the output. Returns
+ * false at the end of the track.
  */
 static bool play_chunk(int current_volume)
 {
-    uint32_t remaining = wav.data_size - wav.data_read;
-    uint32_t want = CHUNK_FRAMES * wav.block_align;
+    for (;;) {
 
-    if (want > remaining) {
-        want = remaining;
-    }
-
-    size_t got = (want > 0) ? fread(read_buffer, 1, want, wav.file) : 0;
-    size_t frames = got / wav.block_align;
-
-    if (frames == 0) {
-        return false;
-    }
-
-    wav.data_read += got;
-
-    /*
-     * Volume curve: squared, which sounds more even
-     * than a straight line.
-     */
-    int32_t gain = current_volume * current_volume;
-    const int32_t full = PLAYER_MAX_VOLUME * PLAYER_MAX_VOLUME;
-
-    for (size_t i = 0; i < frames; i++) {
-
-        int32_t left;
-        int32_t right;
-
-        if (wav.channels == 2) {
-            left = read_buffer[i * 2];
-            right = read_buffer[i * 2 + 1];
-        } else {
-            left = right = read_buffer[i];
+        if (mp3.in_len - mp3.in_pos < INPUT_REFILL_BYTES &&
+            mp3.data_read < mp3.data_size) {
+            fill_input();
         }
 
-        out_buffer[i * 2] = (int16_t)(left * gain / full);
-        out_buffer[i * 2 + 1] = (int16_t)(right * gain / full);
+        size_t available = mp3.in_len - mp3.in_pos;
+
+        if (available == 0) {
+            return false;
+        }
+
+        mp3dec_frame_info_t info;
+
+        int samples = mp3dec_decode_frame(
+            &mp3.decoder, input + mp3.in_pos, available, pcm, &info);
+
+        if (info.frame_bytes == 0) {
+            /*
+             * Only part of a frame left: read more, or
+             * stop if the file is finished.
+             */
+            if (!fill_input()) {
+                return false;
+            }
+            continue;
+        }
+
+        mp3.in_pos += info.frame_bytes;
+
+        if (samples == 0) {
+            /*
+             * Skipped junk, or a frame that needs data
+             * from before a seek point. Keep going.
+             */
+            continue;
+        }
+
+        if ((uint32_t)info.hz != mp3.sample_rate) {
+            mp3.sample_rate = info.hz;
+            audio_out_start(mp3.sample_rate);
+        }
+
+        /*
+         * Volume curve: squared, which sounds more even
+         * than a straight line.
+         */
+        int32_t gain = current_volume * current_volume;
+        const int32_t full = PLAYER_MAX_VOLUME * PLAYER_MAX_VOLUME;
+
+        for (int i = 0; i < samples; i++) {
+
+            int32_t left;
+            int32_t right;
+
+            if (info.channels == 2) {
+                left = pcm[i * 2];
+                right = pcm[i * 2 + 1];
+            } else {
+                left = right = pcm[i];
+            }
+
+            out_buffer[i * 2] = (int16_t)(left * gain / full);
+            out_buffer[i * 2 + 1] = (int16_t)(right * gain / full);
+        }
+
+        audio_out_write(out_buffer, samples);
+
+        mp3.frames_played += samples;
+
+        return true;
     }
-
-    audio_out_write(out_buffer, frames);
-
-    return true;
 }
 
 
@@ -434,20 +571,20 @@ static void player_task(void *arg)
 
             const library_track_t *info = library_track(track);
 
-            if (info != NULL && open_wav(info->path)) {
+            if (info != NULL && open_mp3(info->path)) {
 
                 failures_in_a_row = 0;
-                audio_out_start(wav.sample_rate);
+                audio_out_start(mp3.sample_rate);
 
                 xSemaphoreTake(lock, portMAX_DELAY);
-                duration_ms = bytes_to_ms(wav.data_size);
+                duration_ms = mp3.duration_ms;
                 position_ms = 0;
                 changed();
                 xSemaphoreGive(lock);
 
             } else {
 
-                close_wav();
+                close_mp3();
 
                 /*
                  * Skip unplayable files, but give up if
@@ -469,20 +606,20 @@ static void player_task(void *arg)
             }
         }
 
-        if (seek_ms >= 0 && wav.file != NULL) {
+        if (seek_ms >= 0 && mp3.file != NULL) {
 
             audio_out_set_muted(true);
             was_playing = false;
 
-            seek_wav((uint32_t)seek_ms);
-            audio_out_start(wav.sample_rate);
+            seek_mp3((uint32_t)seek_ms);
+            audio_out_start(mp3.sample_rate);
 
             xSemaphoreTake(lock, portMAX_DELAY);
-            position_ms = bytes_to_ms(wav.data_read);
+            position_ms = mp3_position_ms();
             xSemaphoreGive(lock);
         }
 
-        if (!is_playing || wav.file == NULL) {
+        if (!is_playing || mp3.file == NULL) {
 
             audio_out_set_muted(true);
             was_playing = false;
@@ -495,7 +632,7 @@ static void player_task(void *arg)
         }
 
         if (!was_playing) {
-            audio_out_start(wav.sample_rate);
+            audio_out_start(mp3.sample_rate);
             audio_out_set_muted(false);
             was_playing = true;
         }
@@ -503,7 +640,7 @@ static void player_task(void *arg)
         if (play_chunk(current_volume)) {
 
             xSemaphoreTake(lock, portMAX_DELAY);
-            position_ms = bytes_to_ms(wav.data_read);
+            position_ms = mp3_position_ms();
             xSemaphoreGive(lock);
 
             continue;
@@ -540,7 +677,7 @@ void player_init(void)
     xTaskCreatePinnedToCore(
         player_task,
         "player",
-        4096,
+        PLAYER_TASK_STACK,
         NULL,
         5,
         &player_task_handle,
