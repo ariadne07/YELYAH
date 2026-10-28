@@ -5,7 +5,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
-static const char *TAG = "BUTTONS";
+static const char *TAG = "BUTTONS"; 
 
 /* Timing configuration */
 #define DEBOUNCE_TIME_US      50000     // 50 ms

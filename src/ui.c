@@ -8,6 +8,7 @@
 #include "storage.h"
 
 #include "driver/gpio.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
@@ -307,6 +308,25 @@ static void shut_down_for_battery(void)
 }
 
 
+/*
+ * While plugged into a computer the player runs (and
+ * charges) from USB, so a low reading must never put it
+ * to sleep. It also means an unconnected battery-sense
+ * pin can't knock the board off USB during development.
+ *
+ * Wokwi always reports USB as connected, so the check is
+ * skipped there to keep the battery slider testable.
+ */
+static bool usb_power_connected(void)
+{
+#ifdef WOKWI
+    return false;
+#else
+    return usb_serial_jtag_is_connected();
+#endif
+}
+
+
 static void check_battery(void)
 {
     int mv = battery_read_mv();
@@ -321,7 +341,7 @@ static void check_battery(void)
     battery_mv = mv;
 
     if (mv < BATTERY_CRITICAL_MV) {
-        if (++critical_count >= CRITICAL_READINGS) {
+        if (++critical_count >= CRITICAL_READINGS && !usb_power_connected()) {
             shut_down_for_battery();
         }
     } else {

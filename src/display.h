@@ -3,8 +3,12 @@
 
 #include <stdint.h>
 
+/*
+ * Drawing area. The real screen is 240x240; the Wokwi
+ * ILI9341 is 240x320 but only its top 240x240 is used.
+ */
 #define DISPLAY_WIDTH  240
-#define DISPLAY_HEIGHT 320
+#define DISPLAY_HEIGHT 240
 
 /*
  * Font metrics. Each character is 5x7 pixels plus
@@ -23,8 +27,8 @@
 #define COLOR_DARK  0x2104
 
 /*
- * Initializes the shared SPI bus (LCD + SD card)
- * and the LCD panel.
+ * Initializes the shared SPI bus (LCD + SD card) and the
+ * panel: ST7789 on hardware, ILI9341 in Wokwi.
  */
 void display_init(void);
 

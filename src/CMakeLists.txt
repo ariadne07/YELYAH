@@ -12,6 +12,7 @@ idf_component_register(
         esp_driver_i2s
         esp_driver_sdspi
         esp_adc
+        esp_driver_usb_serial_jtag
         esp_timer
         fatfs
         sdmmc

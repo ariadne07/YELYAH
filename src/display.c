@@ -7,8 +7,25 @@
 #include "esp_err.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
-#include "esp_lcd_ili9341.h"
 #include "esp_log.h"
+
+/*
+ * Panel driver per build:
+ *
+ *   Hardware: Adafruit 1.54" 240x240 IPS (ST7789), PID 3787
+ *   Wokwi:    ILI9341 240x320 stand-in (Wokwi has no ST7789).
+ *             The UI uses only its top 240x240, so the
+ *             simulator shows what the real screen will.
+ */
+#ifdef WOKWI
+#include "esp_lcd_ili9341.h"
+#define PANEL_HEIGHT 320
+#define PANEL_PCLK_HZ (20 * 1000 * 1000)
+#else
+#include "esp_lcd_panel_st7789.h"
+#define PANEL_HEIGHT 240
+#define PANEL_PCLK_HZ (40 * 1000 * 1000)    // ST7789 handles up to ~62.5 MHz writes
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -461,7 +478,7 @@ void display_init(void)
         .dc_gpio_num = LCD_DC,
         .cs_gpio_num = LCD_CS,
 
-        .pclk_hz = 20 * 1000 * 1000,
+        .pclk_hz = PANEL_PCLK_HZ,
 
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
@@ -480,29 +497,24 @@ void display_init(void)
     );
     ESP_ERROR_CHECK(ret);
 
-    /*
-     * ILI9341 panel.
-     */
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = LCD_RST,
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
         .bits_per_pixel = 16
     };
 
-    ret = esp_lcd_new_panel_ili9341(
-        io_handle,
-        &panel_config,
-        &panel_handle
-    );
+#ifdef WOKWI
+
+    /*
+     * ILI9341 (simulator).
+     */
+    ret = esp_lcd_new_panel_ili9341(io_handle, &panel_config, &panel_handle);
     ESP_ERROR_CHECK(ret);
 
     ret = esp_lcd_panel_reset(panel_handle);
     ESP_ERROR_CHECK(ret);
 
     ret = esp_lcd_panel_init(panel_handle);
-    ESP_ERROR_CHECK(ret);
-
-    ret = esp_lcd_panel_disp_on_off(panel_handle, true);
     ESP_ERROR_CHECK(ret);
 
     /*
@@ -514,7 +526,62 @@ void display_init(void)
     ret = esp_lcd_panel_mirror(panel_handle, true, false);
     ESP_ERROR_CHECK(ret);
 
-    ESP_LOGI(TAG, "Display initialized");
+#else
+
+    /*
+     * ST7789 (Adafruit 1.54" 240x240).
+     */
+    ret = esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel_handle);
+    ESP_ERROR_CHECK(ret);
+
+    ret = esp_lcd_panel_reset(panel_handle);
+    ESP_ERROR_CHECK(ret);
+
+    ret = esp_lcd_panel_init(panel_handle);
+    ESP_ERROR_CHECK(ret);
+
+    /*
+     * IPS panels like this one show inverted colors
+     * unless inversion is switched on (Adafruit's own
+     * driver does the same).
+     */
+    ret = esp_lcd_panel_invert_color(panel_handle, true);
+    ESP_ERROR_CHECK(ret);
+
+    /*
+     * Default orientation: header pins along the top
+     * edge. The controller has 320 rows of memory but
+     * this panel only shows the first 240, so no offset
+     * is needed here. If you rotate the screen 180
+     * degrees (mirror both axes), also call
+     * esp_lcd_panel_set_gap(panel_handle, 0, 80).
+     */
+    ret = esp_lcd_panel_swap_xy(panel_handle, false);
+    ESP_ERROR_CHECK(ret);
+
+    ret = esp_lcd_panel_mirror(panel_handle, false, false);
+    ESP_ERROR_CHECK(ret);
+
+#endif
+
+    /*
+     * Clear the whole panel before showing anything, so
+     * there's no random power-on garbage. (On the ILI9341
+     * this also blanks the 80 rows below the UI.)
+     */
+    const int band_rows = DRAW_BUFFER_PIXELS / DISPLAY_WIDTH;
+
+    memset(draw_buffer, 0, sizeof(draw_buffer));
+
+    for (int y = 0; y < PANEL_HEIGHT; y += band_rows) {
+        int rows = (y + band_rows > PANEL_HEIGHT) ? PANEL_HEIGHT - y : band_rows;
+        draw_bitmap_sync(0, y, DISPLAY_WIDTH, y + rows, draw_buffer);
+    }
+
+    ret = esp_lcd_panel_disp_on_off(panel_handle, true);
+    ESP_ERROR_CHECK(ret);
+
+    ESP_LOGI(TAG, "Display initialized (%dx%d)", DISPLAY_WIDTH, DISPLAY_HEIGHT);
 }
 
 /* -------------------------------------------------------------------------- */
